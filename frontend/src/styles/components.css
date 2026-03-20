@@ -1,0 +1,409 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: background 0.2s, color 0.2s;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-indic {
+  font-family:
+    'Noto Sans Devanagari Variable',
+    'Noto Sans Devanagari',
+    'Noto Sans Bengali',
+    'Noto Sans Tamil',
+    'Noto Sans Telugu',
+    'Noto Sans Gujarati',
+    'Noto Sans Kannada',
+    'Noto Sans Malayalam',
+    'Noto Sans Gurmukhi',
+    system-ui;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Segment rows ─────────────────────────────────────────── */
+.segment {
+  border-left: 3px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.segment.active {
+  border-left-color: var(--accent);
+  background: var(--accent-subtle);
+}
+.segment:hover:not(.active) {
+  background: var(--surface-1);
+}
+.segment.keyboard-selected {
+  border-left-color: var(--text-muted);
+  background: var(--surface-1);
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -1px;
+}
+
+/* Edit button reveal on hover */
+.segment .edit-reveal {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.segment:hover .edit-reveal,
+.segment.keyboard-selected .edit-reveal {
+  opacity: 1;
+}
+
+/* Translation update flash */
+.translation-updated {
+  animation: fadeIn 0.35s ease;
+}
+
+/* Typewriter cursor blink */
+.typewriter-cursor {
+  display: inline;
+  color: var(--accent);
+  font-weight: 300;
+  animation: cursorBlink 0.6s steps(2) infinite;
+  margin-left: 1px;
+}
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.7; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-slideDown {
+  animation: slideDown 150ms ease-out;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 200ms ease-out;
+}
+
+/* ── Drop zone ────────────────────────────────────────────── */
+.drop-zone {
+  transition: all 0.15s;
+}
+.drop-zone.drag-over {
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  transform: scale(1.01);
+}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover {
+  transform: translateY(-0.5px);
+}
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(194, 102, 10, 0.25);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 4px 16px rgba(194, 102, 10, 0.35);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.btn-secondary:hover {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+}
+.btn-ghost:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ── Select ───────────────────────────────────────────────── */
+select {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 28px 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23A8A29E' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s;
+}
+select:hover {
+  border-color: var(--border-strong);
+}
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Modal ────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+.modal {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  box-shadow: var(--shadow-lg);
+  animation: scaleIn 0.2s ease-out;
+  overflow: hidden;
+}
+.modal-header {
+  padding: 20px 24px 0;
+  border-top: 3px solid var(--accent);
+}
+.modal-body {
+  padding: 16px 24px 24px;
+}
+
+/* ── Toast ────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text-primary);
+  color: var(--surface-0);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 200;
+  pointer-events: none;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.25s ease-out;
+}
+
+/* ── Progress bar ─────────────────────────────────────────── */
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+/* ── Two-column layout ────────────────────────────────────── */
+.two-col {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-1);
+  box-shadow: 2px 0 12px rgba(120, 100, 70, 0.06);
+}
+.main-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
+/* ── Segment list ─────────────────────────────────────────── */
+.segment-list-header {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr;
+  gap: 16px;
+  padding: 10px 20px;
+  border-bottom: 2px solid var(--border);
+  background: var(--surface-1);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.segment-list-header span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.segment-list > .segment + .segment {
+  border-top: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+/* ── Empty state ──────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ── Inputs ───────────────────────────────────────────────── */
+input[type='text'],
+textarea {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+input[type='text']:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+input[type='text']:focus,
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+textarea {
+  font-family: 'Noto Sans Devanagari Variable', 'Noto Sans Devanagari', system-ui;
+  font-size: 16px;
+  line-height: 1.7;
+  resize: none;
+}
+
+/* ── Waveform placeholder ─────────────────────────────────── */
+.waveform-placeholder {
+  background: var(--surface-2);
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Speed control (segmented) ────────────────────────────── */
+.speed-control {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.speed-control button {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  border-right: 1px solid var(--border);
+}
+.speed-control button:last-child {
+  border-right: none;
+}
+.speed-control button:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.speed-control button.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  font-weight: 600;
+}

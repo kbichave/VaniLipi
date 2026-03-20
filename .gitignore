@@ -1,0 +1,26 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environment
+.env
+
+# Test fixtures — large WAV files downloaded at test time
+tests/test_data/fleurs_marathi/audio/
+
+# Frontend build artifacts (Vite)
+frontend/node_modules/
+frontend/dist/
+dist/
+
+# Claude project settings
+.claude/
+
+# macOS
+.DS_Store
+
+CLAUDE.md
+
+test_data

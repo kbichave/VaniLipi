@@ -1,0 +1,4 @@
+# Model weights are too large for git (~5GB total).
+# Download instructions: see VANILIPI_BUILD_PLAN.md
+*.npz
+*.safetensors

@@ -1,0 +1,35 @@
+# ML - ASR
+mlx>=0.18.0
+mlx-whisper>=0.4.0
+
+# ML - Translation (Phase 1 baseline: PyTorch + IndicTrans2 200M)
+torch>=2.2.0
+transformers>=4.36.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
+IndicTransToolkit>=0.1.0
+
+# Backend
+fastapi>=0.109.0
+uvicorn[standard]>=0.25.0
+websockets>=12.0
+python-multipart>=0.0.6
+
+# Audio
+soundfile>=0.12.0
+librosa>=0.10.0
+
+# Export
+python-docx>=1.0.0
+fpdf2>=2.7.0
+
+# Native desktop window
+pywebview>=5.0
+
+# Utilities
+aiofiles>=23.2.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+httpx>=0.26.0
