@@ -12,6 +12,12 @@
   <p>Offline speech-to-text and English translation for <strong>14 Indian languages</strong>.<br/>
   Hindi, Marathi, Bengali, Tamil, Telugu, Urdu, Gujarati, Kannada, Malayalam, Punjabi, Nepali, Sindhi, Assamese, Sanskrit<br/><br/>
   Runs entirely on Apple Silicon. No internet, no cloud, no data leaves your Mac.</p>
+
+  <br/>
+
+  **Custom PyTorch → MLX port of IndicTrans2 1B** · fp16, 762 parameters, native Metal inference<br/>
+  **KV-cached beam search decoder** · O(n) autoregressive decoding with cross-attention reuse<br/>
+  **Whisper hallucination filtering** · n-gram loop detection, silence gating, density thresholding
 </div>
 
 ---
