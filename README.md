@@ -1,178 +1,211 @@
-# VaniLipi
+<div align="center">
+  <img src="logo.png" alt="VaniLipi" width="120" />
+  <h1>VaniLipi</h1>
+  <p><strong>वाणीलिपी</strong> — Your voice, transcribed and translated</p>
 
-Offline speech-to-text and English translation for 14 Indian languages. Runs entirely on Apple Silicon, no internet needed.
+  ![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple&logoColor=white)
+  ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+  ![MLX](https://img.shields.io/badge/MLX-Metal%20GPU-FF6B00?logo=apple&logoColor=white)
+  ![License](https://img.shields.io/badge/License-MIT-green)
+  ![Offline](https://img.shields.io/badge/100%25-Offline-brightgreen)
 
-Transcribes audio in Marathi, Hindi, Bengali, Tamil, Telugu, and 9 other languages, then translates to English. Everything stays on your Mac.
+  <p>Offline speech-to-text and English translation for <strong>14 Indian languages</strong>.<br/>
+  Runs entirely on Apple Silicon. No internet, no cloud, no data leaves your Mac.</p>
+</div>
 
-![VaniLipi](screenshots/01_landing_page.png)
+---
 
-## Requirements
+<div align="center">
+  <img src="screenshots/01_landing_page.png" alt="VaniLipi Landing Page" width="700" />
+  <br/><br/>
+  <img src="screenshots/04_workspace_empty.png" alt="VaniLipi Workspace" width="700" />
+</div>
 
-- macOS 12+ on Apple Silicon (M1/M2/M3/M4)
-- Python 3.11+, arm64 native (not Rosetta)
-- ffmpeg (`brew install ffmpeg`)
-- ~5 GB disk space for bundled models
+---
 
-## Quick start
+## Features
 
-```bash
-bash scripts/install.sh
-bash scripts/launch.sh
-```
-
-Opens `http://localhost:7860` in your browser.
-
-To create a desktop shortcut:
-
-```bash
-bash scripts/create_app.sh
-```
-
-## How it works
-
-1. Upload audio (drag-and-drop or Browse)
-2. Pick a language or leave it on auto-detect
-3. Hit Transcribe. Segments stream in as they're ready.
-4. Click any segment to edit the source text, then re-translate
-5. Export to SRT, VTT, TXT, DOCX, PDF, or JSON
+- **14 Indian languages** — Hindi, Marathi, Bengali, Tamil, Telugu, Urdu, Gujarati, Kannada, Malayalam, Punjabi, Nepali, Sindhi, Assamese, Sanskrit
+- **Transcribe + Translate** — Speech to native script, then English translation, in one pipeline
+- **100% offline** — All models run locally on Metal GPU via [MLX](https://github.com/ml-explore/mlx). Zero network calls
+- **Real-time streaming** — Segments appear as they're processed via WebSocket
+- **Edit & re-translate** — Click any segment to fix the transcription, get a fresh translation
+- **Export** — SRT, VTT, TXT, DOCX, PDF, JSON
+- **Native macOS app** — pywebview WKWebView window, no browser chrome
+- **Long audio** — Files up to 3 hours, chunked and streamed
+- **Hallucination filtering** — Catches Whisper loops, silence hallucinations, and density anomalies
+- **Keyboard-driven** — Full shortcut support for playback, navigation, editing, and export
 
 ## Models
 
-Both models run on Metal GPU via MLX. Nothing hits the network.
+Both models run on Metal GPU. They load sequentially to fit within 16 GB unified memory.
 
 | Component | Model | Size | Framework |
 |-----------|-------|------|-----------|
-| ASR | Whisper large-v3 | 2.9 GB | mlx-whisper |
-| Translation | IndicTrans2 1B, fp16 | 1.9 GB | MLX |
+| Speech Recognition | [Whisper large-v3](https://huggingface.co/openai/whisper-large-v3) | 2.9 GB | [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) |
+| Translation | [IndicTrans2 1B](https://huggingface.co/ai4bharat/indictrans2-indic-en-1B) | 1.9 GB | MLX (custom) |
 
-Bundled under `models/asr/` and `models/translation/`. They load one at a time to stay within 16 GB unified memory.
+> IndicTrans2 was converted from PyTorch to MLX fp16 for native Apple Silicon inference. See [Technical Details](#technical-details) below.
 
-## Under the hood
+## Requirements
 
-### PyTorch to MLX conversion
+- macOS 12+ on Apple Silicon (M1 / M2 / M3 / M4)
+- Python 3.11+, arm64 native (not Rosetta)
+- ffmpeg (`brew install ffmpeg`)
+- ~5 GB disk space for models
 
-IndicTrans2 1B ships as a PyTorch model on HuggingFace (`ai4bharat/indictrans2-indic-en-1B`). We converted it to MLX fp16 for native Apple Silicon inference. The process:
+## Quick Start
 
-1. Load the original safetensors, remap all parameter names from HuggingFace convention to our MLX module hierarchy (e.g. `model.decoder.layers.0.self_attn.k_proj.weight` becomes `decoder.layers.0.self_attn.key_proj.weight`).
-2. Cast all weights to float16. Final file: 762 parameters, 1.9 GB.
-3. Extract `lm_head.weight` separately. The 1B model has `share_decoder_input_output_embed: false`, so the output projection is its own matrix, not a pointer to the decoder embedding table. Missing this produces correct-looking logits that always pick EOS.
+### Option 1: Standalone App (recommended)
 
-Three bugs in the positional embedding implementation took the model from "generates EOS on step 0" to "translates correctly":
+Download the `.dmg` from [Releases](https://github.com/kbichave/VaniLipi/releases), drag to Applications, and open. Everything is bundled — no setup needed.
 
-- **Layout**: fairseq concatenates `[sin_all_dims, cos_all_dims]`. We had interleaved `[sin0, cos0, sin1, cos1, ...]`. Wrong layout means every position looks like every other position to the model.
-- **Divisor**: fairseq divides by `half_dim - 1` (511 for d_model=1024). We had `d_model` (1024). This compresses the frequency spectrum and makes distant positions indistinguishable.
-- **Offset**: fairseq positions start at `padding_idx + 1 = 2`, not 0. Off-by-two means every token attends with the wrong positional signal.
+> **First launch:** Right-click → Open to bypass Gatekeeper (one-time only).
 
-Each bug independently causes the decoder to emit EOS immediately. All three had to be fixed together before any output appeared.
+### Option 2: From Source
 
-### KV-cache beam search
+```bash
+git clone https://github.com/kbichave/VaniLipi.git
+cd VaniLipi
 
-The decoder caches projected key/value tensors across steps. Each step feeds one new token through the 18-layer decoder instead of rerunning the full sequence. Cross-attention K/V are computed once from the encoder output and reused for every subsequent step. Decoding cost drops from O(n^2) to O(n).
+# Install dependencies
+bash scripts/install.sh
 
-When beams swap positions during search, the cache is reindexed to stay consistent with the new beam layout.
+# Launch (native window)
+bash scripts/launch.sh
+```
 
-### Chunked interleaved pipeline
+## Usage
 
-Long files (up to 3 hours) get split into 5-minute chunks. For each chunk: transcribe with Whisper, unload ASR, translate with IndicTrans2, stream results to the UI, then move on. You see output as it's produced rather than waiting for the whole file.
+1. **Upload** — Drag an audio/video file onto the upload area, or click to browse
+2. **Pick a language** — Select from the dropdown, or leave on auto-detect
+3. **Transcribe** — Segments stream in with timestamps as they're processed
+4. **Edit** — Click any segment to edit the source text, then get a fresh translation
+5. **Export** — Download as SRT, VTT, TXT, DOCX, PDF, or JSON
 
-Timestamps carry a per-chunk offset so segments stay correctly aligned across boundaries.
+### Supported Audio Formats
 
-### Hallucination filtering
+MP3, WAV, M4A, FLAC, OGG, MP4, MKV, WebM — auto-converted to 16kHz mono WAV.
 
-Whisper hallucinates in predictable ways. Three filters catch them:
-
-- **no_speech_prob > 0.6**: Whisper thinks the segment is silence but generated text anyway. Common on music, noise, or trailing silence.
-- **Repeated n-gram loops**: Whisper gets stuck ("thank you thank you thank you"). Flagged when the most common bigram or trigram covers > 50% of all positions.
-- **Text density > 15 chars/sec**: More characters than the audio window could realistically produce.
-
-Detected segments become `[inaudible]` instead of being dropped, so the timeline stays intact.
-
-### Initial prompts for ASR
-
-Whisper's `initial_prompt` biases the decoder toward correct orthography. VaniLipi passes vocabulary hints for Marathi and Hindi: common conjunct words, foreign names in Devanagari. This fixes the worst ASR errors: broken word boundaries, phonetic substitutions (e.g. "soatantra" instead of "svatantra"), and Devanagari/Latin confusion.
-
-## Supported languages
-
-| Language | Script | Quality | Recommended |
-|----------|--------|---------|-------------|
-| Hindi | Devanagari | Very good | Yes |
-| Marathi | Devanagari | Good | Yes |
-| Bengali | Bengali | Good | Yes |
-| Tamil | Tamil | Good | Yes |
-| Telugu | Telugu | Good | Yes |
-| Urdu | Perso-Arabic | Good | No |
-| Gujarati | Gujarati | Fair | No |
-| Kannada | Kannada | Fair | No |
-| Malayalam | Malayalam | Fair | No |
-| Punjabi | Gurmukhi | Fair | No |
-| Nepali | Devanagari | Fair | No |
-| Sindhi | Devanagari | Poor | No |
-| Assamese | Bengali | Poor | No |
-| Sanskrit | Devanagari | Poor | No |
-
-## Keyboard shortcuts
+### Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| Space | Play/Pause |
-| Tab | Next segment |
-| Shift+Tab | Previous segment |
-| Enter | Edit selected segment |
-| Escape | Cancel edit |
-| Cmd+E | Export menu |
-| Cmd+F | Search transcript |
-| Cmd+1/2/3/4 | Playback speed (0.75x-1.5x) |
+| `Space` | Play / Pause |
+| `Tab` / `Shift+Tab` | Next / Previous segment |
+| `Enter` | Edit selected segment |
+| `Escape` | Cancel edit |
+| `Cmd+E` | Export menu |
+| `Cmd+F` | Search transcript |
+| `Cmd+1/2/3/4` | Playback speed (0.75x — 1.5x) |
 
-## Audio formats
+## Supported Languages
 
-MP3, WAV, M4A, FLAC, OGG, MP4, MKV, WebM. Auto-converted to 16kHz mono WAV. Max duration: 3 hours.
+| Language | Script | Quality |
+|----------|--------|---------|
+| Hindi | Devanagari | Very Good |
+| Marathi | Devanagari | Good |
+| Bengali | Bengali | Good |
+| Tamil | Tamil | Good |
+| Telugu | Telugu | Good |
+| Urdu | Perso-Arabic | Good |
+| Gujarati | Gujarati | Fair |
+| Kannada | Kannada | Fair |
+| Malayalam | Malayalam | Fair |
+| Punjabi | Gurmukhi | Fair |
+| Nepali | Devanagari | Fair |
+| Sindhi | Devanagari | Poor |
+| Assamese | Bengali | Poor |
+| Sanskrit | Devanagari | Poor |
 
 ## Architecture
 
 ```
-VaniLipi.app (Automator)
-  └── scripts/launch.sh
+VaniLipi.app
+  └── pywebview (native WKWebView window)
         └── uvicorn backend.main:app  (FastAPI, port 7860)
-              ├── GET  /                     → React SPA
-              ├── POST /api/upload            → validate + save audio
-              ├── WS   /api/stream/{file_id}  → streaming transcription
-              ├── POST /api/transcribe        → batch transcription
-              ├── POST /api/retranslate       → re-translate edited segment
-              ├── POST /api/export/{format}   → export transcript
-              ├── GET  /api/projects          → recent projects
-              └── GET  /api/models/status     → model availability
+              ├── GET  /                      → React SPA
+              ├── POST /api/upload             → validate + save audio
+              ├── WS   /api/stream/{file_id}   → streaming transcription
+              ├── POST /api/transcribe         → batch fallback
+              ├── POST /api/retranslate        → re-translate edited segment
+              ├── POST /api/export/{format}    → export transcript
+              ├── GET  /api/projects           → recent projects
+              └── GET  /api/models/status      → model availability
 ```
 
-ASR: mlx-whisper, Whisper large-v3, Metal GPU
-Translation: IndicTrans2 1B fp16, MLX, KV-cached beam search
-Frontend: Single-file React, wavesurfer.js, Noto Sans Devanagari
-Privacy: Zero network calls. Audio never leaves your machine.
+| Layer | Stack |
+|-------|-------|
+| ASR | mlx-whisper, Whisper large-v3, Metal GPU |
+| Translation | IndicTrans2 1B fp16, MLX, KV-cached beam search |
+| Backend | FastAPI + uvicorn |
+| Frontend | React + TypeScript + Tailwind, wavesurfer.js |
+| Desktop | pywebview (native WKWebView, no Electron) |
+| Privacy | Zero network calls. Audio never leaves your machine. |
 
-## Model credits
+## Technical Details
 
-VaniLipi builds on two open-source model families. All inference runs locally — no data is sent to any server.
+<details>
+<summary><strong>PyTorch → MLX conversion</strong></summary>
 
-**Whisper large-v3** — OpenAI
-Original model: [openai/whisper-large-v3](https://huggingface.co/openai/whisper-large-v3)
-MLX conversion: [mlx-community/whisper-large-v3](https://huggingface.co/mlx-community/whisper-large-v3)
-Paper: Radford et al., *Robust Speech Recognition via Large-Scale Weak Supervision*, 2022
-License: MIT
+IndicTrans2 1B ships as a PyTorch model on HuggingFace. We converted it to MLX fp16 for native Apple Silicon inference:
 
-**IndicTrans2 1B** — AI4Bharat, IIT Madras
-Original model: [ai4bharat/indictrans2-indic-en-1B](https://huggingface.co/ai4bharat/indictrans2-indic-en-1B)
-Paper: Gala et al., *IndicTrans2: Towards High-Quality and Accessible Machine Translation Models for all 22 Scheduled Indian Languages*, 2023
-Toolkit: [VarunGumma/IndicTransToolkit](https://github.com/VarunGumma/IndicTransToolkit)
-License: MIT
+1. Load the original safetensors, remap all parameter names from HuggingFace convention to the MLX module hierarchy (e.g. `model.decoder.layers.0.self_attn.k_proj.weight` → `decoder.layers.0.self_attn.key_proj.weight`).
+2. Cast all weights to float16. Final file: 762 parameters, 1.9 GB.
+3. Extract `lm_head.weight` separately — the 1B model does not share decoder input/output embeddings.
 
-The IndicTrans2 weights were converted from PyTorch to MLX fp16 for native Apple Silicon inference (see "Under the hood" above).
+Three positional embedding bugs had to be fixed simultaneously:
+
+- **Layout**: fairseq concatenates `[sin_all_dims, cos_all_dims]`. We had interleaved `[sin0, cos0, sin1, cos1, ...]`.
+- **Divisor**: fairseq divides by `half_dim - 1` (511 for d_model=1024). We had `d_model` (1024).
+- **Offset**: fairseq positions start at `padding_idx + 1 = 2`, not 0.
+
+Each bug independently causes the decoder to emit EOS immediately. All three had to be fixed together.
+</details>
+
+<details>
+<summary><strong>KV-cache beam search</strong></summary>
+
+The decoder caches projected key/value tensors across steps. Each step feeds one new token through the 18-layer decoder instead of rerunning the full sequence. Cross-attention K/V are computed once from the encoder output and reused for every step. Decoding cost drops from O(n²) to O(n).
+
+When beams swap positions during search, the cache is reindexed to stay consistent with the new beam layout.
+</details>
+
+<details>
+<summary><strong>Chunked interleaved pipeline</strong></summary>
+
+Long files (up to 3 hours) get split into 5-minute chunks. For each chunk: transcribe with Whisper → unload ASR → translate with IndicTrans2 → stream results → next chunk. You see output as it's produced.
+
+Timestamps carry a per-chunk offset so segments stay correctly aligned across boundaries.
+</details>
+
+<details>
+<summary><strong>Hallucination filtering</strong></summary>
+
+Whisper hallucinates in predictable ways. Three filters catch them:
+
+- **no_speech_prob > 0.6** — Whisper thinks it's silence but generated text anyway
+- **Repeated n-gram loops** — The most common bigram/trigram covers > 50% of positions
+- **Text density > 15 chars/sec** — More characters than the audio window could produce
+
+Detected segments become `[inaudible]` to preserve timeline integrity.
+</details>
+
+<details>
+<summary><strong>Initial prompts for ASR</strong></summary>
+
+Whisper's `initial_prompt` biases the decoder toward correct orthography. VaniLipi passes vocabulary hints for Marathi and Hindi: common conjunct words, foreign names in Devanagari. This fixes broken word boundaries, phonetic substitutions, and Devanagari/Latin confusion.
+</details>
 
 ## Development
 
 ```bash
 source venv/bin/activate
 
+# Run tests
 python -m pytest tests/ -v
 
+# Dev server with hot reload
 uvicorn backend.main:app --reload --port 7860
 
 # Quick translation test
@@ -186,12 +219,28 @@ unload()
 
 ## Troubleshooting
 
-**App won't open:** System Settings > Privacy & Security > Open Anyway.
+| Problem | Fix |
+|---------|-----|
+| App won't open | System Settings → Privacy & Security → Open Anyway |
+| Models not found | Ensure `models/asr/whisper-large-v3/` and `models/translation/indictrans2-1b/` have weight files (excluded from git) |
+| MLX won't load | Verify arm64 Python: `python -c "import platform; print(platform.processor())"` → `arm` |
+| Poor accuracy | See quality column in language table — "Poor" tier needs manual editing |
+| Port conflict | Kill processes on ports 7860–7869, or the app will auto-increment |
 
-**Models not found:** Check that `models/asr/whisper-large-v3/` and `models/translation/indictrans2-1b/` have the weight files. They're excluded from git by `models/.gitignore`.
+## Acknowledgments
 
-**MLX won't load:** Make sure Python is arm64: `python -c "import platform; print(platform.processor())"` should print `arm`.
+VaniLipi builds on two open-source model families:
 
-**Bad accuracy:** See the quality column in the language table. "Poor" tier languages will need manual editing.
+**[Whisper large-v3](https://huggingface.co/openai/whisper-large-v3)** — OpenAI
+- MLX conversion by [mlx-community](https://huggingface.co/mlx-community/whisper-large-v3)
+- Radford et al., *Robust Speech Recognition via Large-Scale Weak Supervision*, 2022
+- License: MIT
 
-**Port conflict:** VaniLipi tries ports 7860-7869. Kill whatever's using them, or it'll find the next open one.
+**[IndicTrans2 1B](https://huggingface.co/ai4bharat/indictrans2-indic-en-1B)** — AI4Bharat, IIT Madras
+- Toolkit: [IndicTransToolkit](https://github.com/VarunGumma/IndicTransToolkit) by Varun Gumma
+- Gala et al., *IndicTrans2: Towards High-Quality and Accessible Machine Translation Models for all 22 Scheduled Indian Languages*, 2023
+- License: MIT
+
+## License
+
+[MIT](LICENSE)
