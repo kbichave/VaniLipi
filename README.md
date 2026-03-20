@@ -106,31 +106,6 @@ MP3, WAV, M4A, FLAC, OGG, MP4, MKV, WebM — auto-converted to 16kHz mono WAV.
 | Assamese | Bengali | Poor |
 | Sanskrit | Devanagari | Poor |
 
-## Architecture
-
-```
-VaniLipi.app
-  └── pywebview (native WKWebView window)
-        └── uvicorn backend.main:app  (FastAPI, port 7860)
-              ├── GET  /                      → React SPA
-              ├── POST /api/upload             → validate + save audio
-              ├── WS   /api/stream/{file_id}   → streaming transcription
-              ├── POST /api/transcribe         → batch fallback
-              ├── POST /api/retranslate        → re-translate edited segment
-              ├── POST /api/export/{format}    → export transcript
-              ├── GET  /api/projects           → recent projects
-              └── GET  /api/models/status      → model availability
-```
-
-| Layer | Stack |
-|-------|-------|
-| ASR | mlx-whisper, Whisper large-v3, Metal GPU |
-| Translation | IndicTrans2 1B fp16, MLX, KV-cached beam search |
-| Backend | FastAPI + uvicorn |
-| Frontend | React + TypeScript + Tailwind, wavesurfer.js |
-| Desktop | pywebview (native WKWebView, no Electron) |
-| Privacy | Zero network calls. Audio never leaves your machine. |
-
 ## Technical Details
 
 <details>
