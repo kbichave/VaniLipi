@@ -137,22 +137,6 @@ export function App() {
       if (audioUrl) URL.revokeObjectURL(audioUrl)
       setAudioUrl(url)
 
-      // If this file was previously transcribed, auto-load the cached result
-      if (data.cached && data.file_hash) {
-        try {
-          const project = await fetchProject(data.file_hash)
-          if (project.segments && project.segments.length > 0) {
-            ws.setSegments(project.segments.map((s: Segment, i: number) => ({ ...s, id: `c${i}` })))
-            ws.setDetectedLang(project.detected_language ?? null)
-            ws.setStatusMsg(`Loaded cached transcript (${project.segments.length} segments)`)
-            showToast('Loaded previous transcript!')
-            setUploading(false)
-            return
-          }
-        } catch {
-          // Cache load failed — fall through to normal flow
-        }
-      }
 
       ws.setStatusMsg('Uploaded. Ready to transcribe.')
       ws.setSegments([])

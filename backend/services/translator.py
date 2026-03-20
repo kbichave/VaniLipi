@@ -53,6 +53,17 @@ def load(model_dir: Path = TRANSLATION_MODEL_DIR) -> None:
     model_dir = Path(model_dir)
     logger.info("Loading MLX translator from %s", model_dir)
 
+    # Verify model files exist before attempting to load
+    required_files = ["config.json", "weights.safetensors", "dict.SRC.json",
+                      "dict.TGT.json", "model.SRC", "model.TGT"]
+    missing = [f for f in required_files if not (model_dir / f).exists()]
+    if missing:
+        raise RuntimeError(
+            f"Translation model incomplete at {model_dir}. "
+            f"Missing: {', '.join(missing)}. "
+            "Try reinstalling VaniLipi."
+        )
+
     config = IT2Config.from_model_config(model_dir / "config.json")
     model = IndicTrans2(config)
     weights = mx.load(str(model_dir / "weights.safetensors"))
@@ -163,16 +174,28 @@ def translate_segments(
         Same segments list, each dict augmented with "english" key.
     """
     src_lang = WHISPER_TO_INDICTRANS[whisper_language_code]
-    texts = [seg["text"].strip() for seg in segments]
-    translations: list[str] = []
 
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
+    # Separate translatable text from inaudible/empty segments
+    translatable_indices: list[int] = []
+    translatable_texts: list[str] = []
+    for i, seg in enumerate(segments):
+        text = seg["text"].strip()
+        if text and text != "[inaudible]":
+            translatable_indices.append(i)
+            translatable_texts.append(text)
+
+    # Translate only real text
+    translations: list[str] = []
+    for i in range(0, len(translatable_texts), batch_size):
+        batch = translatable_texts[i : i + batch_size]
         batch_translations = translate_batch(batch, src_lang=src_lang)
         translations.extend(batch_translations)
 
-    for seg, eng in zip(segments, translations):
-        seg["english"] = eng
+    # Assign translations back; inaudible segments get empty english
+    for seg in segments:
+        seg["english"] = ""
+    for idx, eng in zip(translatable_indices, translations):
+        segments[idx]["english"] = eng
 
     return segments
 

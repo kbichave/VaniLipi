@@ -43,6 +43,16 @@ def load(model_id: str = ASR_MODEL) -> None:
         unload()
 
     logger.info("Loading ASR model: %s", model_id)
+
+    # Verify model exists before attempting to load (clear error for bundled app)
+    model_path = Path(model_id)
+    if model_path.is_dir() and not (model_path / "config.json").exists():
+        raise RuntimeError(
+            f"ASR model not found at {model_id}. "
+            "The model files may be missing or corrupted. "
+            "Try reinstalling VaniLipi."
+        )
+
     import mlx_whisper  # noqa: F401 -- import triggers Metal allocation
 
     _loaded_model_id = model_id
@@ -147,11 +157,20 @@ def transcribe(
         word_timestamps=word_timestamps,
         verbose=False,
         initial_prompt=_get_initial_prompt(language),
-        hallucination_silence_threshold=2.0,
+        condition_on_previous_text=True,  # helps noisy audio maintain context
+        hallucination_silence_threshold=1.0,
     )
 
     detected = result.get("language", "")
     segments = result.get("segments", [])
+
+    # Clean up [inaudible] tokens that Whisper inserts inline for silence gaps
+    for seg in segments:
+        text = seg.get("text", "")
+        cleaned = text.replace("[inaudible]", "").strip()
+        # If stripping [inaudible] leaves real text, keep the text
+        # If nothing remains, mark the whole segment as inaudible
+        seg["text"] = cleaned if cleaned else _INAUDIBLE
 
     # Filter hallucinated segments before returning
     filtered = _filter_hallucinations(segments)
@@ -195,27 +214,32 @@ def _filter_hallucinations(segments: list[dict]) -> list[dict]:
         if not text:
             continue
 
-        # 1. High no_speech_prob → likely hallucination on silence
         no_speech = seg.get("no_speech_prob", 0.0)
-        if no_speech > 0.6:
+        avg_logprob = seg.get("avg_logprob", 0.0)
+        seg_duration = seg.get("end", 0.0) - seg.get("start", 0.0)
+
+        # 1. Very high no_speech_prob AND low confidence → hallucination on silence.
+        # In noisy outdoor audio, no_speech_prob is elevated even with real speech.
+        # Only filter when Whisper is very unsure AND the text looks like gibberish
+        # (low avg_logprob = Whisper itself isn't confident in what it produced).
+        if no_speech > 0.9 and avg_logprob < -1.0:
             logger.info(
-                "Hallucination filtered (no_speech_prob=%.2f): '%s'",
-                no_speech, text[:60],
+                "Hallucination filtered (no_speech=%.2f, logprob=%.2f): '%s'",
+                no_speech, avg_logprob, text[:60],
             )
             seg["text"] = _INAUDIBLE
             filtered.append(seg)
             continue
 
-        # 2. Repeated bigram/trigram loops
+        # 2. Repeated bigram/trigram loops (Whisper gets stuck)
         if _has_repetition_loop(text):
             logger.info("Hallucination filtered (repetition loop): '%s'", text[:60])
             seg["text"] = _INAUDIBLE
             filtered.append(seg)
             continue
 
-        # 3. Text too long for audio duration (>15 chars per second is suspicious)
-        seg_duration = seg.get("end", 0.0) - seg.get("start", 0.0)
-        if seg_duration > 0 and len(text) / seg_duration > 15:
+        # 3. Text too long for audio duration (>20 chars per second is suspicious)
+        if seg_duration > 0 and len(text) / seg_duration > 20:
             logger.info(
                 "Hallucination filtered (%.0f chars/sec): '%s'",
                 len(text) / seg_duration, text[:60],

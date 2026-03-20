@@ -7,6 +7,8 @@ Invariants:
 - Errors are raised as ValueError with user-friendly messages
 """
 import hashlib
+import json
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -40,19 +42,20 @@ def is_video_file(path: Path) -> bool:
 def extract_audio_from_video(video_path: Path) -> Path:
     """
     Extract audio track from a video file as 16kHz mono WAV.
+    Applies the same preprocessing as convert_to_wav (noise reduction,
+    normalization) since video audio is often noisier than dedicated recordings.
     The video file is deleted after extraction — only audio is kept.
     """
     audio_out = TEMP_DIR / f"{video_path.stem}_extracted.wav"
+
+    # Step 1: Extract raw audio (no filters yet — we need it for analysis)
+    raw_out = TEMP_DIR / f"{video_path.stem}_raw.wav"
     result = subprocess.run(
         [
-            "ffmpeg",
-            "-y",
+            "ffmpeg", "-y",
             "-i", str(video_path),
-            "-vn",          # discard video stream
-            "-ar", "16000",
-            "-ac", "1",
-            "-f", "wav",
-            str(audio_out),
+            "-vn", "-ar", "16000", "-ac", "1", "-f", "wav",
+            str(raw_out),
         ],
         capture_output=True,
         text=True,
@@ -61,6 +64,35 @@ def extract_audio_from_video(video_path: Path) -> Path:
         raise AudioValidationError(
             f"Could not extract audio from video. Details: {result.stderr.strip()}"
         )
+
+    # Step 2: Analyze and apply adaptive filters
+    try:
+        profile = _analyze_audio(raw_out)
+        filter_chain = _build_filter_chain(profile)
+    except Exception:
+        logger.warning("Audio analysis failed — using raw extraction")
+        filter_chain = None
+
+    if filter_chain:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(raw_out),
+                "-af", filter_chain,
+                "-ar", "16000", "-ac", "1", "-f", "wav",
+                str(audio_out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            raw_out.unlink(missing_ok=True)
+        else:
+            logger.warning("Filtered extraction failed, using raw: %s", result.stderr[:200])
+            raw_out.rename(audio_out)
+    else:
+        # Clean audio — just rename
+        raw_out.rename(audio_out)
     # Delete the video — we only store audio
     try:
         video_path.unlink()
@@ -110,20 +142,185 @@ def get_audio_duration(path: Path) -> float:
     )
 
 
-def convert_to_wav(path: Path) -> Path:
+logger = logging.getLogger("vanilipi.audio")
+
+
+# ---------------------------------------------------------------------------
+# Adaptive audio analysis
+# ---------------------------------------------------------------------------
+
+def _analyze_audio(path: Path) -> dict:
     """
-    Convert any supported audio file to 16kHz mono WAV in the app temp dir.
-    Returns path to the converted WAV. The caller is responsible for cleanup.
+    Probe audio characteristics using ffmpeg's astats filter.
+    Returns metrics used to decide which cleanup filters to apply.
+
+    Key metrics:
+      rms_level_db:  average loudness (dB). Quiet = below -30, loud = above -15.
+      peak_level_db: max peak. Clipping risk above -1.
+      noise_floor_db: estimated noise floor from the quietest 10% of frames.
+      dynamic_range_db: difference between peak and noise floor.
+      crest_factor_db: peak-to-rms ratio. High = spiky (transient noise).
     """
-    output = TEMP_DIR / f"{path.stem}_converted.wav"
     result = subprocess.run(
         [
             "ffmpeg",
-            "-y",           # overwrite without asking
             "-i", str(path),
-            "-ar", "16000", # 16kHz sample rate (Whisper requirement)
-            "-ac", "1",     # mono
-            "-f", "wav",
+            "-af", "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+            "-f", "null", "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    # Parse per-frame RMS values to estimate noise floor
+    rms_values = []
+    for line in result.stderr.splitlines() + result.stdout.splitlines():
+        if "RMS_level" in line and "=" in line:
+            try:
+                val = float(line.split("=")[-1].strip())
+                if val > -100:  # ignore -inf
+                    rms_values.append(val)
+            except ValueError:
+                pass
+
+    # Fallback: use astats summary from stderr
+    stats = _parse_astats_summary(result.stderr)
+
+    if rms_values:
+        rms_values.sort()
+        n = len(rms_values)
+        # Noise floor = average of quietest 10% of frames
+        quiet_count = max(1, n // 10)
+        noise_floor = sum(rms_values[:quiet_count]) / quiet_count
+        overall_rms = sum(rms_values) / n
+        peak = max(rms_values)
+    else:
+        noise_floor = stats.get("rms_trough", -60.0)
+        overall_rms = stats.get("rms_level", -25.0)
+        peak = stats.get("peak_level", -3.0)
+
+    dynamic_range = peak - noise_floor
+    crest_factor = peak - overall_rms
+
+    profile = {
+        "rms_level_db": round(overall_rms, 1),
+        "peak_level_db": round(peak, 1),
+        "noise_floor_db": round(noise_floor, 1),
+        "dynamic_range_db": round(dynamic_range, 1),
+        "crest_factor_db": round(crest_factor, 1),
+    }
+    logger.info("Audio profile: %s", profile)
+    return profile
+
+
+def _parse_astats_summary(stderr: str) -> dict:
+    """Extract key stats from ffmpeg astats stderr output."""
+    stats: dict = {}
+    for line in stderr.splitlines():
+        lower = line.lower().strip()
+        if "rms level" in lower:
+            try:
+                stats["rms_level"] = float(lower.split(":")[-1].strip().split()[0])
+            except (ValueError, IndexError):
+                pass
+        elif "peak level" in lower:
+            try:
+                stats["peak_level"] = float(lower.split(":")[-1].strip().split()[0])
+            except (ValueError, IndexError):
+                pass
+        elif "rms trough" in lower:
+            try:
+                stats["rms_trough"] = float(lower.split(":")[-1].strip().split()[0])
+            except (ValueError, IndexError):
+                pass
+    return stats
+
+
+def _build_filter_chain(profile: dict) -> str | None:
+    """
+    Choose ffmpeg audio filter chain based on the noise profile.
+
+    Returns an -af filter string, or None if no processing is needed.
+
+    Classification:
+      CLEAN:  noise_floor < -45 dB, dynamic_range > 30 dB
+              → no filters needed, Whisper handles this well
+      MILD:   noise_floor -45 to -30 dB
+              → gentle highpass + light noise reduction
+      NOISY:  noise_floor -30 to -20 dB (indoor crowd, AC, fan)
+              → highpass + moderate noise reduction
+      HEAVY:  noise_floor > -20 dB (outdoor traffic, wind, construction)
+              → aggressive highpass + strong noise reduction + dynamic normalization
+    """
+    noise_floor = profile.get("noise_floor_db", -60.0)
+    dynamic_range = profile.get("dynamic_range_db", 40.0)
+
+    if noise_floor < -50 and dynamic_range > 35:
+        # Clean studio audio — don't touch it
+        logger.info("Audio classification: CLEAN (noise=%.1f dB, DR=%.1f dB) — no filters", noise_floor, dynamic_range)
+        return None
+
+    if noise_floor < -40 and dynamic_range > 25:
+        # Mild noise (quiet room, light AC) — gentle cleanup
+        logger.info("Audio classification: MILD (noise=%.1f dB, DR=%.1f dB)", noise_floor, dynamic_range)
+        return "highpass=f=80,afftdn=nf=-30"
+
+    if noise_floor < -30 or dynamic_range > 15:
+        # Moderate noise (crowd, outdoor with some traffic) — stronger cleanup
+        logger.info("Audio classification: NOISY (noise=%.1f dB, DR=%.1f dB)", noise_floor, dynamic_range)
+        return "highpass=f=100,lowpass=f=7500,afftdn=nf=-25"
+
+    # Heavy noise (busy road, construction, strong wind) — full treatment
+    logger.info("Audio classification: HEAVY (noise=%.1f dB, DR=%.1f dB)", noise_floor, dynamic_range)
+    return (
+        "highpass=f=120,"
+        "lowpass=f=7000,"
+        "afftdn=nf=-20:tn=1,"
+        "dynaudnorm=f=200:g=15:p=0.9"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Conversion
+# ---------------------------------------------------------------------------
+
+def convert_to_wav(path: Path) -> Path:
+    """
+    Convert any supported audio file to 16kHz mono WAV.
+    Adaptively applies audio cleanup based on the file's noise profile.
+    """
+    output = TEMP_DIR / f"{path.stem}_converted.wav"
+
+    # Analyze noise characteristics
+    try:
+        profile = _analyze_audio(path)
+        filter_chain = _build_filter_chain(profile)
+    except Exception:
+        logger.warning("Audio analysis failed — using plain conversion")
+        filter_chain = None
+
+    if filter_chain:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(path),
+                "-af", filter_chain,
+                "-ar", "16000", "-ac", "1", "-f", "wav",
+                str(output),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return output
+        logger.warning("Filtered conversion failed, falling back to plain: %s", result.stderr[:200])
+
+    # Plain conversion (fallback or clean audio)
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-i", str(path),
+            "-ar", "16000", "-ac", "1", "-f", "wav",
             str(output),
         ],
         capture_output=True,
@@ -252,8 +449,8 @@ def cleanup_chunks(chunk_paths: list[Path]) -> None:
         try:
             if p.exists() and "_chunk" in p.name:
                 p.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("Failed to clean up chunk %s: %s", p, exc)
 
 
 def save_upload(data: bytes, filename: str) -> Path:

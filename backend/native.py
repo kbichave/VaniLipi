@@ -71,6 +71,12 @@ def main() -> None:
 
     # Start uvicorn as a separate subprocess so ML models get their own
     # memory space and don't compete with the pywebview/WKWebView process.
+    # Use APP_DIR env var if set (bundled .app), else fall back to cwd
+    app_dir = os.environ.get("PYTHONPATH", os.getcwd())
+    # Split PYTHONPATH and use the first entry (the app dir)
+    if os.pathsep in app_dir:
+        app_dir = app_dir.split(os.pathsep)[0]
+
     server_proc = subprocess.Popen(
         [
             sys.executable, "-m", "uvicorn",
@@ -79,8 +85,8 @@ def main() -> None:
             "--port", str(port),
             "--log-level", "warning",
         ],
-        # Inherit cwd so backend imports work
-        cwd=os.getcwd(),
+        cwd=app_dir,
+        env=os.environ.copy(),  # Critical: inherit DYLD_LIBRARY_PATH, PATH (ffmpeg), REPO_MODELS_DIR
     )
 
     # Ensure the server subprocess is killed when this process exits

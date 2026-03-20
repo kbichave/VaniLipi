@@ -12,7 +12,26 @@ MODELS_DIR = APP_SUPPORT_DIR / "models"
 TEMP_DIR = APP_SUPPORT_DIR / "tmp"
 
 for _d in (APP_SUPPORT_DIR, PROJECTS_DIR, MODELS_DIR, TEMP_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
+    try:
+        _d.mkdir(parents=True, exist_ok=True)
+        # Verify the directory is actually writable (macOS sandbox can create
+        # but not write, or the parent may have restrictive permissions)
+        _test_file = _d / ".vanilipi_write_test"
+        _test_file.touch()
+        _test_file.unlink()
+    except (PermissionError, OSError):
+        # Fall back to a location that's always writable
+        import tempfile as _tempfile
+        _fallback = Path(_tempfile.gettempdir()) / "VaniLipi" / _d.name
+        _fallback.mkdir(parents=True, exist_ok=True)
+        if _d is APP_SUPPORT_DIR:
+            APP_SUPPORT_DIR = _fallback  # /tmp/VaniLipi/VaniLipi — not ideal but writable
+        elif _d is PROJECTS_DIR:
+            PROJECTS_DIR = _fallback
+        elif _d is MODELS_DIR:
+            MODELS_DIR = _fallback
+        elif _d is TEMP_DIR:
+            TEMP_DIR = _fallback
 
 # ---------------------------------------------------------------------------
 # Model paths (local, bundled in repo under models/)

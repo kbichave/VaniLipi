@@ -120,10 +120,6 @@ async def upload_audio(file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided.")
 
-    data = await file.read()
-    if len(data) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-
     # Validate extension before saving to avoid storing garbage
     from backend.services.audio import (
         validate_extension, AudioValidationError,
@@ -135,10 +131,22 @@ async def upload_audio(file: UploadFile = File(...)) -> JSONResponse:
     except AudioValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Use a UUID-prefixed filename to avoid collisions
+    # Stream upload to disk (handles large video files without OOM)
     file_id = uuid.uuid4().hex
-    saved_name = f"{file_id}_{file.filename}"
-    saved_path = save_upload(data, saved_name)
+    # Sanitize filename: replace spaces/special chars to avoid path issues
+    import re
+    safe_name = re.sub(r'[^\w.\-]', '_', file.filename)
+    saved_name = f"{file_id}_{safe_name}"
+    saved_path = TEMP_DIR / saved_name
+    size_bytes = 0
+    async with aiofiles.open(saved_path, "wb") as out:
+        while chunk := await file.read(1024 * 1024):  # 1MB chunks
+            await out.write(chunk)
+            size_bytes += len(chunk)
+
+    if size_bytes == 0:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     # If it's a video file, extract audio and discard the video
     if is_video_file(saved_path):
@@ -147,18 +155,11 @@ async def upload_audio(file: UploadFile = File(...)) -> JSONResponse:
         except AudioValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    # Check if we have a cached transcript for this exact file (Phase 9)
-    file_hash = file_sha256(saved_path)
-    cached = project_store.load_project(file_hash)
-    cached_flag = cached is not None
-
     return JSONResponse(
         {
             "file_id": file_id,
-            "file_hash": file_hash,
             "filename": file.filename,
-            "size_bytes": len(data),
-            "cached": cached_flag,
+            "size_bytes": size_bytes,
         }
     )
 
@@ -249,7 +250,8 @@ async def transcribe_audio(
     # Auto-save to project cache (Phase 9)
     try:
         file_hash = file_sha256(audio_path)
-        # Normalize segments to {start, end, marathi, english} for storage
+        # Normalize segments to {start, end, marathi, english} for storage.
+        # Drop segments that are entirely [inaudible] — they add no value.
         normalized = [
             {
                 "start": s.get("start", 0.0),
@@ -258,6 +260,7 @@ async def transcribe_audio(
                 "english": s.get("english", ""),
             }
             for s in segments
+            if s.get("text", s.get("marathi", "")).strip() not in ("", "[inaudible]")
         ]
         audio_path_obj = audio_path if isinstance(audio_path, Path) else Path(audio_path)
         original_name = audio_path_obj.name.split("_", 1)[-1] if "_" in audio_path_obj.name else audio_path_obj.name
@@ -282,7 +285,10 @@ async def transcribe_audio(
                 "detected": language == "auto",
             },
             "model": "whisper-large-v3",
-            "segments": segments,
+            "segments": [
+                s for s in segments
+                if s.get("text", "").strip() not in ("", "[inaudible]")
+            ],
             "warning": translation_warning,
         }
     )
@@ -447,14 +453,17 @@ async def stream_transcription(websocket: WebSocket, file_id: str) -> None:
                 seg["start"] = seg.get("start", 0.0) + chunk_time_offset
                 seg["end"] = seg.get("end", 0.0) + chunk_time_offset
 
-            # Stream ASR segments immediately
+            # Stream ASR segments immediately (skip inaudible-only segments)
             for seg in chunk_segments:
+                seg_text = seg.get("text", "").strip()
+                if seg_text in ("", "[inaudible]"):
+                    continue
                 await _ws_send(websocket, {
                     "type": "segment",
                     "id": seg["id"],
                     "start": seg["start"],
                     "end": seg["end"],
-                    "text": seg.get("text", ""),
+                    "text": seg_text,
                 })
 
             # --- Translate this chunk's segments ---

@@ -181,7 +181,16 @@ for bin in "${BINARIES[@]}"; do
         dylib_name="$(basename "$dylib")"
         # Check if this binary references the absolute Homebrew path
         if otool -L "$bin" 2>/dev/null | grep -q "$dylib"; then
-            install_name_tool -change "$dylib" "@loader_path/../libs/$dylib_name" "$bin" 2>/dev/null || true
+            # Compute the correct relative path from the binary's directory to $LIBS_DIR.
+            # @loader_path resolves to the directory containing the binary at runtime.
+            #   Resources/python/bin/python3  → needs ../../libs/  (up to python, up to Resources, into libs)
+            #   Resources/python/lib/**/*.so  → needs ../../../libs/
+            #   Resources/libs/*.dylib        → needs ./ (same dir)
+            bin_dir="$(cd "$(dirname "$bin")" && pwd)"
+            libs_abs="$(cd "$LIBS_DIR" && pwd)"
+            # Use Python to compute the relative path reliably
+            rel_path="$(python3 -c "import os.path; print(os.path.relpath('$libs_abs', '$bin_dir'))")"
+            install_name_tool -change "$dylib" "@loader_path/$rel_path/$dylib_name" "$bin" 2>/dev/null || true
             changed=true
         fi
     done
@@ -219,7 +228,15 @@ mkdir -p "$APP_SRC"
 cp -R "$REPO/backend"          "$APP_SRC/backend"
 mkdir -p "$APP_SRC/frontend"
 cp -R "$REPO/frontend/dist"    "$APP_SRC/frontend/dist"
-echo "✓ App source copied"
+
+# Remove dev-only scripts that download from HuggingFace (not needed at runtime,
+# and their trust_remote_code=True is a security risk in a shipped app)
+rm -f "$APP_SRC/backend/services/mlx_translator/convert.py"
+rm -f "$APP_SRC/backend/services/mlx_translator/validate.py"
+# Remove __pycache__ to save space
+find "$APP_SRC" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+echo "✓ App source copied (dev-only scripts excluded)"
 echo ""
 
 # ── ML Models ─────────────────────────────────────────────────────────────────
@@ -262,9 +279,33 @@ export REQUESTS_CA_BUNDLE=""
 # Add bundled ffmpeg to PATH
 export PATH="$RESOURCES/bin:$PATH"
 
+# Log to user's App Support dir (persistent across reboots), with /tmp fallback
+APPDATA="$HOME/Library/Application Support/VaniLipi"
+mkdir -p "$APPDATA" 2>/dev/null || true
+if [[ -w "$APPDATA" ]]; then
+    LOG="$APPDATA/vanilipi.log"
+else
+    LOG="/tmp/vanilipi.log"
+fi
+echo "========================================" >> "$LOG"
+echo "VaniLipi launch: $(date)" >> "$LOG"
+echo "User: $(whoami)" >> "$LOG"
+echo "Bundle: $BUNDLE" >> "$LOG"
+echo "Python: $PYTHON" >> "$LOG"
+echo "DYLD_LIBRARY_PATH: $DYLD_LIBRARY_PATH" >> "$LOG"
+
+# Verify critical paths before launching
+for check_dir in "$PYTHON" "$APP_DIR/backend/main.py" "$RESOURCES/models/asr/whisper-large-v3"; do
+    if [[ ! -e "$check_dir" ]]; then
+        echo "FATAL: Missing $check_dir" >> "$LOG"
+        osascript -e "display dialog \"VaniLipi failed to start: missing $(basename "$check_dir"). See /tmp/vanilipi.log for details.\" buttons {\"OK\"} default button 1 with icon stop with title \"VaniLipi\"" 2>/dev/null
+        exit 1
+    fi
+done
+
 # Launch native window (pywebview starts server + opens WKWebView)
 cd "$APP_DIR"
-exec "$PYTHON" -m backend.native 2>>/tmp/vanilipi.log
+exec "$PYTHON" -m backend.native >> "$LOG" 2>&1
 LAUNCHER
 
 chmod +x "$MACOS_BIN/$APP_NAME"
