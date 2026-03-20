@@ -87,18 +87,6 @@ bash scripts/launch.sh
 
 MP3, WAV, M4A, FLAC, OGG, MP4, MKV, WebM — auto-converted to 16kHz mono WAV.
 
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Space` | Play / Pause |
-| `Tab` / `Shift+Tab` | Next / Previous segment |
-| `Enter` | Edit selected segment |
-| `Escape` | Cancel edit |
-| `Cmd+E` | Export menu |
-| `Cmd+F` | Search transcript |
-| `Cmd+1/2/3/4` | Playback speed (0.75x — 1.5x) |
-
 ## Supported Languages
 
 | Language | Script | Quality |
