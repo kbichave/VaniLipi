@@ -10,6 +10,7 @@
   ![Offline](https://img.shields.io/badge/100%25-Offline-brightgreen)
 
   <p>Offline speech-to-text and English translation for <strong>14 Indian languages</strong>.<br/>
+  Hindi, Marathi, Bengali, Tamil, Telugu, Urdu, Gujarati, Kannada, Malayalam, Punjabi, Nepali, Sindhi, Assamese, Sanskrit<br/><br/>
   Runs entirely on Apple Silicon. No internet, no cloud, no data leaves your Mac.</p>
 </div>
 
@@ -86,25 +87,6 @@ bash scripts/launch.sh
 ### Supported Audio Formats
 
 MP3, WAV, M4A, FLAC, OGG, MP4, MKV, WebM — auto-converted to 16kHz mono WAV.
-
-## Supported Languages
-
-| Language | Script | Quality |
-|----------|--------|---------|
-| Hindi | Devanagari | Very Good |
-| Marathi | Devanagari | Good |
-| Bengali | Bengali | Good |
-| Tamil | Tamil | Good |
-| Telugu | Telugu | Good |
-| Urdu | Perso-Arabic | Good |
-| Gujarati | Gujarati | Fair |
-| Kannada | Kannada | Fair |
-| Malayalam | Malayalam | Fair |
-| Punjabi | Gurmukhi | Fair |
-| Nepali | Devanagari | Fair |
-| Sindhi | Devanagari | Poor |
-| Assamese | Bengali | Poor |
-| Sanskrit | Devanagari | Poor |
 
 ## Technical Details
 
